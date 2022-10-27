@@ -1,27 +1,52 @@
 FROM amazonlinux:2.0.20221004.0
 
 # dependencies
-RUN yum -y install tar xz perl gcc make gmp gmp-devel zlib zlib-devel pkgconfig
+RUN yum -y install \
+    gcc \
+    gmp \
+    gmp-devel \
+    gzip \
+    make \
+    perl \
+    pkgconfig \
+    postgresql-devel \
+    tar \
+    which \
+    xz \
+    zlib \
+    zlib-devel \
+    && yum clean all \
+    && rm -rf /var/cache/yum
 
-# ghc and cabal
-RUN mkdir -p $HOME/.ghcup/bin \
-    && curl -sL https://downloads.haskell.org/ghcup/0.1.18.0/x86_64-linux-ghcup-0.1.18.0 > $HOME/.ghcup/bin/ghcup \
-    && chmod a+x $HOME/.ghcup/bin/ghcup \
-    && $HOME/.ghcup/bin/ghcup install ghc 9.2.4 || (cat $HOME/.ghcup/logs/*.* && false) \
-    && $HOME/.ghcup/bin/ghcup install cabal 3.6.2.0 || (cat $HOME/.ghcup/logs/*.* && false) \
-    && ln -s $($HOME/.ghcup/bin/ghcup whereis ghc) $HOME/.ghcup/bin/ghc
-# ^ The above creation of ghc symlink seems like hack, but ghcup doesn't make ghc available on the path
+# stack
+ARG STACK=2.9.1
+ARG ARCH=x86_64-static
 
-ENV PATH=/root/.ghcup/bin:/root/.cabal/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+RUN set -eux; \
+    cd /tmp; \
+    curl -sSL https://github.com/commercialhaskell/stack/releases/download/v${STACK}/stack-${STACK}-linux-${ARCH}.tar.gz -o stack.tar.gz; \
+    tar -xf stack.tar.gz -C /usr/local/bin --strip-components=1 "stack-$STACK-linux-${ARCH}/stack"; \
+    stack config set system-ghc --global true; \
+    stack config set install-ghc --global false; \
+    # workaround for https://github.com/commercialhaskell/stack/issues/3348
+    echo "allow-different-user: true" >> /root/.stack/config.yaml; \
+    rm -rf /tmp/*; \
+    stack --version;
 
-# cabal-plan
-RUN mkdir -p $HOME/.cabal/bin \
-    && curl -sL https://github.com/haskell-hvr/cabal-plan/releases/download/v0.6.2.0/cabal-plan-0.6.2.0-x86_64-linux.xz > cabal-plan.xz \
-    && echo 'de73600b1836d3f55e32d80385acc055fd97f60eaa0ab68a755302685f5d81bc  cabal-plan.xz' | sha256sum -c - \
-    && xz -d < cabal-plan.xz > $HOME/.cabal/bin/cabal-plan \
-    && rm -f cabal-plan.xz \
-    && chmod a+x $HOME/.cabal/bin/cabal-plan
+# ghc
+ARG GHC_VER=9.2.4
+RUN set -eux; \
+    cd /tmp; \
+    curl -sSL https://downloads.haskell.org/~ghc/${GHC_VER}/ghc-${GHC_VER}-x86_64-fedora27-linux.tar.xz -o ghc.tar.xz; \
+    tar xf ghc.tar.xz; \
+    cd ghc-${GHC_VER}; \
+    ./configure --prefix "/opt/ghc/${GHC_VER}"; \
+    make install; \
+    # remove profiling support to save space
+    find "/opt/ghc/${GHC_VER}/" \( -name "*_p.a" -o -name "*.p_hi" \) -type f -delete; \
+    rm -rf "/opt/ghc/${GHC_VER}/share/"; \
+    rm -rf /tmp/*; \
+    "/opt/ghc/${GHC_VER}/bin/ghc" --version
 
-RUN ghc --version \ 
-    && cabal --version \ 
-    && cabal-plan --version \
+ENV PATH /root/.local/bin:/opt/ghc/9.2.4/bin:$PATH
+
